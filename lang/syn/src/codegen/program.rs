@@ -68,9 +68,7 @@ pub fn generate(program: Program) -> proc_macro2::TokenStream {
         #[cfg(not(feature = "no-entrypoint"))]
         fn entry(program_id: &Pubkey, accounts: &[AccountInfo], ix_data: &[u8]) -> ProgramResult {
             #[cfg(feature = "anchor-debug")]
-            {
-                msg!("anchor-debug is active");
-            }
+        msg!("anchor-debug is active");
             if ix_data.len() < 8 {
                 return Err(ProgramError::Custom(99));
             }
@@ -128,13 +126,17 @@ pub fn generate_dispatch(program: &Program) -> proc_macro2::TokenStream {
                 let sighash_tts: proc_macro2::TokenStream =
                     format!("{:?}", sighash_arr).parse().unwrap();
                 quote! {
-                    #sighash_tts => {
-                        let ix = instruction::state::#ix_name::deserialize(&mut ix_data)
-                            .map_err(|_| ProgramError::Custom(1))?; // todo: error code
-                        let instruction::state::#variant_arm = ix;
-                        __private::__state::__ctor(program_id, accounts, #(#ctor_args),*)
+                        #sighash_tts => {
+                #[cfg(feature = "anchor-debug")]
+                msg!("anchor-debug: matched state constructor");
+                            let ix = instruction::state::#ix_name::deserialize(&mut ix_data)
+                                .map_err(|_| ProgramError::Custom(1))?; // todo: error code
+                #[cfg(feature = "anchor-debug")]
+                msg!("anchor-debug: constructor state deserialization OK");
+                            let instruction::state::#variant_arm = ix;
+                            __private::__state::__ctor(program_id, accounts, #(#ctor_args),*)
+                        }
                     }
-                }
             }
         },
     };
@@ -162,8 +164,12 @@ pub fn generate_dispatch(program: &Program) -> proc_macro2::TokenStream {
                             format!("{:?}", sighash_arr).parse().unwrap();
                         quote! {
                             #sighash_tts => {
+				#[cfg(feature = "anchor-debug")]
+				msg!("anchor-debug: matched state endpoint");
                                 let ix = instruction::state::#ix_name::deserialize(&mut ix_data)
                                     .map_err(|_| ProgramError::Custom(1))?; // todo: error code
+				#[cfg(feature = "anchor-debug")]
+				msg!("anchor-debug: endpoint state deserialization OK");
                                 let instruction::state::#variant_arm = ix;
                                 __private::__state::#ix_method_name(program_id, accounts, #(#ix_arg_names),*)
                             }
@@ -470,54 +476,101 @@ pub fn generate_non_inlined_handlers(program: &Program) -> proc_macro2::TokenStr
                 let mod_name = &program.name;
                 if state.is_zero_copy {
                     quote! {
-                        // One time state account initializer. Will faill on subsequent
-                        // invocations.
-                        #[inline(never)]
-                        pub fn __ctor(program_id: &Pubkey, accounts: &[AccountInfo], #(#ctor_typed_args),*) -> ProgramResult {
-                            let mut remaining_accounts: &[AccountInfo] = accounts;
+                                // One time state account initializer. Will faill on subsequent
+                                // invocations.
+                                #[inline(never)]
+                                pub fn __ctor(program_id: &Pubkey, accounts: &[AccountInfo], #(#ctor_typed_args),*) -> ProgramResult {
+                    #[cfg(feature = "anchor-debug")]
+                    msg!("anchor-debug: Inside zero-copy __ctor");
+                                    let mut remaining_accounts: &[AccountInfo] = accounts;
 
-                            // Deserialize accounts.
-                            let ctor_accounts = anchor_lang::__private::Ctor::try_accounts(program_id, &mut remaining_accounts)?;
-                            let mut ctor_user_def_accounts = #anchor_ident::try_accounts(program_id, &mut remaining_accounts)?;
+                                    // Deserialize accounts.
+                                    let ctor_accounts = anchor_lang::__private::Ctor::try_accounts(program_id, &mut remaining_accounts)?;
+                                    let mut ctor_user_def_accounts = #anchor_ident::try_accounts(program_id, &mut remaining_accounts)?;
 
-                            // Create the solana account for the ctor data.
-                            let from = ctor_accounts.from.key;
-                            let (base, nonce) = Pubkey::find_program_address(&[], ctor_accounts.program.key);
-                            let seed = anchor_lang::__private::PROGRAM_STATE_SEED;
-                            let owner = ctor_accounts.program.key;
-                            let to = Pubkey::create_with_seed(&base, seed, owner).unwrap();
-                            let space = 8 + std::mem::size_of::<#name>();
-                            let lamports = ctor_accounts.rent.minimum_balance(std::convert::TryInto::try_into(space).unwrap());
-                            let seeds = &[&[nonce][..]];
-                            let ix = anchor_lang::solana_program::system_instruction::create_account_with_seed(
-                                from,
-                                &to,
-                                &base,
-                                seed,
-                                lamports,
-                                space as u64,
-                                owner,
-                            );
-                            anchor_lang::solana_program::program::invoke_signed(
-                                &ix,
-                                &[
-                                    ctor_accounts.from.clone(),
-                                    ctor_accounts.to.clone(),
-                                    ctor_accounts.base.clone(),
-                                    ctor_accounts.system_program.clone(),
-                                ],
-                                &[seeds],
-                            )?;
+                    #[cfg(feature = "anchor-debug")]
+                    msg!("anchor-debug: zero-copy constructor account deserialization OK");
 
-                            // Zero copy deserialize.
-                            let loader: anchor_lang::Loader<#mod_name::#name> = anchor_lang::Loader::try_from_init(&ctor_accounts.to)?;
+                                    // Create the solana account for the ctor data.
+                                    let from = ctor_accounts.from.key;
+                                    let (base, nonce) = Pubkey::find_program_address(&[], ctor_accounts.program.key);
+                                    let seed = anchor_lang::__private::PROGRAM_STATE_SEED;
+                                    let owner = ctor_accounts.program.key;
+                                    let to = Pubkey::create_with_seed(&base, seed, owner).unwrap();
+                                    let space = 8 + std::mem::size_of::<#name>();
+                                    let lamports = ctor_accounts.rent.minimum_balance(std::convert::TryInto::try_into(space).unwrap());
+                                    let seeds = &[&[nonce][..]];
+                                    let ix = anchor_lang::solana_program::system_instruction::create_account_with_seed(
+                                        from,
+                                        &to,
+                                        &base,
+                                        seed,
+                                        lamports,
+                                        space as u64,
+                                        owner,
+                                    );
+                                    anchor_lang::solana_program::program::invoke_signed(
+                                        &ix,
+                                        &[
+                                            ctor_accounts.from.clone(),
+                                            ctor_accounts.to.clone(),
+                                            ctor_accounts.base.clone(),
+                                            ctor_accounts.system_program.clone(),
+                                        ],
+                                        &[seeds],
+                                    )?;
+                    #[cfg(feature = "anchor-debug")]
+                    msg!("anchor-debug: zero-copy constructor program invoke_signed OK");
 
-                            // Invoke the ctor in a new lexical scope so that
-                            // the zero-copy RefMut gets dropped. Required
-                            // so that we can subsequently run the exit routine.
-                            {
-                                let mut instance = loader.load_init()?;
-                                instance.new(
+                                    // Zero copy deserialize.
+                                    let loader: anchor_lang::Loader<#mod_name::#name> = anchor_lang::Loader::try_from_init(&ctor_accounts.to)?;
+                    #[cfg(feature = "anchor-debug")]
+                    msg!("anchor-debug: zero-copy constructor loader deserialization OK");
+
+                                    // Invoke the ctor in a new lexical scope so that
+                                    // the zero-copy RefMut gets dropped. Required
+                                    // so that we can subsequently run the exit routine.
+                                    {
+                                        let mut instance = loader.load_init()?;
+                                        instance.new(
+                                            anchor_lang::Context::new(
+                                                program_id,
+                                                &mut ctor_user_def_accounts,
+                                                remaining_accounts,
+                                            ),
+                                            #(#ctor_untyped_args),*
+                                        )?;
+                                    }
+                                    // Exit routines.
+                                    ctor_user_def_accounts.exit(program_id)?;
+                                    loader.exit(program_id)?;
+
+                    #[cfg(feature = "anchor-debug")]
+                    msg!("anchor-debug: Exit routines OK. zero-copy Constructor OK");
+
+                                    Ok(())
+                                }
+                            }
+                } else {
+                    quote! {
+                            // One time state account initializer. Will faill on subsequent
+                            // invocations.
+                            #[inline(never)]
+                            pub fn __ctor(program_id: &Pubkey, accounts: &[AccountInfo], #(#ctor_typed_args),*) -> ProgramResult {
+                    #[cfg(feature = "anchor-debug")]
+                    msg!("anchor-debug: Inside __ctor");
+                                let mut remaining_accounts: &[AccountInfo] = accounts;
+
+                                // Deserialize accounts.
+                                let ctor_accounts = anchor_lang::__private::Ctor::try_accounts(program_id, &mut remaining_accounts)?;
+                    #[cfg(feature = "anchor-debug")]
+                    msg!("anchor-debug: constructor account deserialization OK");
+                                let mut ctor_user_def_accounts = #anchor_ident::try_accounts(program_id, &mut remaining_accounts)?;
+                    #[cfg(feature = "anchor-debug")]
+                    msg!("anchor-debug: constructor user-defined account deserialization OK");
+
+                                // Invoke the ctor.
+                                let instance = #mod_name::#name::new(
                                     anchor_lang::Context::new(
                                         program_id,
                                         &mut ctor_user_def_accounts,
@@ -525,76 +578,54 @@ pub fn generate_non_inlined_handlers(program: &Program) -> proc_macro2::TokenStr
                                     ),
                                     #(#ctor_untyped_args),*
                                 )?;
+
+                    #[cfg(feature = "anchor-debug")]
+                    msg!("anchor-debug: constructor new() OK");
+
+                                // Create the solana account for the ctor data.
+                                let from = ctor_accounts.from.key;
+                                let (base, nonce) = Pubkey::find_program_address(&[], ctor_accounts.program.key);
+                                let seed = anchor_lang::ProgramState::<#name>::seed();
+                                let owner = ctor_accounts.program.key;
+                                let to = Pubkey::create_with_seed(&base, seed, owner).unwrap();
+                                let space = anchor_lang::__private::AccountSize::size(&instance)?;
+                                let lamports = ctor_accounts.rent.minimum_balance(std::convert::TryInto::try_into(space).unwrap());
+                                let seeds = &[&[nonce][..]];
+                                let ix = anchor_lang::solana_program::system_instruction::create_account_with_seed(
+                                    from,
+                                    &to,
+                                    &base,
+                                    seed,
+                                    lamports,
+                                    space,
+                                    owner,
+                                );
+                                anchor_lang::solana_program::program::invoke_signed(
+                                    &ix,
+                                    &[
+                                        ctor_accounts.from.clone(),
+                                        ctor_accounts.to.clone(),
+                                        ctor_accounts.base.clone(),
+                                        ctor_accounts.system_program.clone(),
+                                    ],
+                                    &[seeds],
+                                )?;
+                    #[cfg(feature = "anchor-debug")]
+                    msg!("anchor-debug: constructor invoke_signed for create_account_with_seed OK");
+
+                                // Serialize the state and save it to storage.
+                                ctor_user_def_accounts.exit(program_id)?;
+                                let mut data = ctor_accounts.to.try_borrow_mut_data()?;
+                                let dst: &mut [u8] = &mut data;
+                                let mut cursor = std::io::Cursor::new(dst);
+                                instance.try_serialize(&mut cursor)?;
+
+                    #[cfg(feature = "anchor-debug")]
+                    msg!("anchor-debug: constructor state saved OK");
+
+                                Ok(())
                             }
-
-                            // Exit routines.
-                            ctor_user_def_accounts.exit(program_id)?;
-                            loader.exit(program_id)?;
-
-                            Ok(())
                         }
-                    }
-                } else {
-                    quote! {
-                        // One time state account initializer. Will faill on subsequent
-                        // invocations.
-                        #[inline(never)]
-                        pub fn __ctor(program_id: &Pubkey, accounts: &[AccountInfo], #(#ctor_typed_args),*) -> ProgramResult {
-                            let mut remaining_accounts: &[AccountInfo] = accounts;
-
-                            // Deserialize accounts.
-                            let ctor_accounts = anchor_lang::__private::Ctor::try_accounts(program_id, &mut remaining_accounts)?;
-                            let mut ctor_user_def_accounts = #anchor_ident::try_accounts(program_id, &mut remaining_accounts)?;
-
-                            // Invoke the ctor.
-                            let instance = #mod_name::#name::new(
-                                anchor_lang::Context::new(
-                                    program_id,
-                                    &mut ctor_user_def_accounts,
-                                    remaining_accounts,
-                                ),
-                                #(#ctor_untyped_args),*
-                            )?;
-
-                            // Create the solana account for the ctor data.
-                            let from = ctor_accounts.from.key;
-                            let (base, nonce) = Pubkey::find_program_address(&[], ctor_accounts.program.key);
-                            let seed = anchor_lang::ProgramState::<#name>::seed();
-                            let owner = ctor_accounts.program.key;
-                            let to = Pubkey::create_with_seed(&base, seed, owner).unwrap();
-                            let space = anchor_lang::__private::AccountSize::size(&instance)?;
-                            let lamports = ctor_accounts.rent.minimum_balance(std::convert::TryInto::try_into(space).unwrap());
-                            let seeds = &[&[nonce][..]];
-                            let ix = anchor_lang::solana_program::system_instruction::create_account_with_seed(
-                                from,
-                                &to,
-                                &base,
-                                seed,
-                                lamports,
-                                space,
-                                owner,
-                            );
-                            anchor_lang::solana_program::program::invoke_signed(
-                                &ix,
-                                &[
-                                    ctor_accounts.from.clone(),
-                                    ctor_accounts.to.clone(),
-                                    ctor_accounts.base.clone(),
-                                    ctor_accounts.system_program.clone(),
-                                ],
-                                &[seeds],
-                            )?;
-
-                            // Serialize the state and save it to storage.
-                            ctor_user_def_accounts.exit(program_id)?;
-                            let mut data = ctor_accounts.to.try_borrow_mut_data()?;
-                            let dst: &mut [u8] = &mut data;
-                            let mut cursor = std::io::Cursor::new(dst);
-                            instance.try_serialize(&mut cursor)?;
-
-                            Ok(())
-                        }
-                    }
                 }
             }
         },

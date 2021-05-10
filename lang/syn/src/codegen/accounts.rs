@@ -22,7 +22,11 @@ pub fn generate(accs: AccountsStruct) -> proc_macro2::TokenStream {
                     let ty = &s.raw_field.ty;
                     quote! {
                         #[cfg(feature = "anchor-debug")]
-                        ::solana_program::log::sol_log(stringify!(#name));
+                        {
+                            use anchor_lang::solana_program;
+                            solana_program::log::sol_log(stringify!(#name));
+                            solana_program::msg!("anchor-debug: From accounts {:?}", accounts);
+                        }
                         let #name: #ty = anchor_lang::Accounts::try_accounts(program_id, accounts)?;
                     }
                 }
@@ -41,12 +45,19 @@ pub fn generate(accs: AccountsStruct) -> proc_macro2::TokenStream {
                         match f.is_init {
                             false => quote! {
                                 #[cfg(feature = "anchor-debug")]
-                                ::solana_program::log::sol_log(stringify!(#name));
+                                {
+                                    use anchor_lang::solana_program;
+                                    solana_program::log::sol_log(stringify!(#name));
+                                    solana_program::msg!("anchor-debug: next account is {:?}", accounts.get(0).map(|a| a.unsigned_key()));
+                                }
                                 let #name = anchor_lang::Accounts::try_accounts(program_id, accounts)?;
                             },
                             true => quote! {
                                 #[cfg(feature = "anchor-debug")]
-                                ::solana_program::log::sol_log(stringify!(#name));
+                                {
+                                    use anchor_lang::solana_program;
+                                    solana_program::log::sol_log(stringify!(#name));
+                                }
                                 let #name = anchor_lang::AccountsInit::try_accounts_init(program_id, accounts)?;
                             },
                         }
@@ -289,7 +300,7 @@ pub fn generate(accs: AccountsStruct) -> proc_macro2::TokenStream {
         /// `accounts` module (also generated), which re-exports this.
         mod #account_mod_name {
             use super::*;
-            use anchor_lang::prelude::borsh;
+            use anchor_lang::{prelude::borsh};
             #(#re_exports)*
 
             #[derive(anchor_lang::AnchorSerialize)]
@@ -306,13 +317,21 @@ pub fn generate(accs: AccountsStruct) -> proc_macro2::TokenStream {
                     account_metas
                 }
             }
+
         }
 
         impl#combined_generics anchor_lang::Accounts#trait_generics for #name#strct_generics {
             #[inline(never)]
             fn try_accounts(program_id: &anchor_lang::solana_program::pubkey::Pubkey, accounts: &mut &[anchor_lang::solana_program::account_info::AccountInfo<'info>]) -> std::result::Result<Self, anchor_lang::solana_program::program_error::ProgramError> {
+                #[cfg(feature = "anchor-debug")]
+        {
+            anchor_lang::solana_program::msg!("anchor-debug: inside derived try_accounts for:");
+            anchor_lang::solana_program::msg!(stringify!(#name));
+        }
                 // Deserialize each account.
                 #(#deser_fields)*
+                #[cfg(feature = "anchor-debug")]
+        anchor_lang::solana_program::msg!("anchor-debug: deser_fields OK");
                 // Deserialize each associated account.
                 //
                 // Associated accounts are treated specially, because the fields
@@ -320,8 +339,14 @@ pub fn generate(accs: AccountsStruct) -> proc_macro2::TokenStream {
                 // whereas all other fields, i.e. the `deser_fields`, first
                 // deserialize, and then do constraint checks.
                 #(#deser_associated_fields)*
+                #[cfg(feature = "anchor-debug")]
+        anchor_lang::solana_program::msg!("anchor-debug: deser_associated_fields OK");
+
                 // Perform constraint checks on each account.
                 #(#access_checks)*
+                #[cfg(feature = "anchor-debug")]
+        anchor_lang::solana_program::msg!("anchor-debug: access_checks OK");
+
                 // Success. Return the validated accounts.
                 Ok(#name {
                     #(#return_tys),*

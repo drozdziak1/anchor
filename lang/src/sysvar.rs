@@ -42,7 +42,29 @@ impl<'info, T: solana_program::sysvar::Sysvar> Accounts<'info> for Sysvar<'info,
         }
         let account = &accounts[0];
         *accounts = &accounts[1..];
-        Sysvar::from_account_info(account)
+
+        #[cfg(feature = "anchor-debug")]
+        solana_program::msg!(format!(
+            "anchor-debug: Trying sysvar {} from {:?}",
+            std::any::type_name::<T>(),
+            account.unsigned_key(),
+        )
+        .as_str());
+
+        let sysvar_res = Sysvar::from_account_info(account);
+
+        #[cfg(feature = "anchor-debug")]
+        return sysvar_res.map_err(|e| {
+            solana_program::msg!(format!(
+                "anchor-debug: Could not deserialize sysvar {}, {}",
+                std::any::type_name::<T>(),
+                e.to_string()
+            )
+            .as_str());
+            e
+        });
+
+        sysvar_res
     }
 }
 

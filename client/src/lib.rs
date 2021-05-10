@@ -410,24 +410,40 @@ impl<'a> RequestBuilder<'a> {
         let accounts = match self.namespace {
             RequestNamespace::State { new } => {
                 let mut accounts = match new {
-                    false => vec![AccountMeta::new(
-                        anchor_lang::__private::state::address(&self.program_id),
-                        false,
-                    )],
-                    true => vec![
-                        AccountMeta::new_readonly(self.payer.pubkey(), true),
-                        AccountMeta::new(
+                    false => {
+                        let accs = vec![AccountMeta::new(
                             anchor_lang::__private::state::address(&self.program_id),
                             false,
-                        ),
-                        AccountMeta::new_readonly(
-                            Pubkey::find_program_address(&[], &self.program_id).0,
-                            false,
-                        ),
-                        AccountMeta::new_readonly(system_program::ID, false),
-                        AccountMeta::new_readonly(self.program_id, false),
-                        AccountMeta::new_readonly(rent::ID, false),
-                    ],
+                        )];
+                        #[cfg(feature = "anchor-debug")]
+                        eprintln!(
+                            "anchor-debug: prepending accounts for non-constructor call: {:?}",
+                            accs
+                        );
+                        accs
+                    }
+                    true => {
+                        let accs = vec![
+                            AccountMeta::new_readonly(self.payer.pubkey(), true),
+                            AccountMeta::new(
+                                anchor_lang::__private::state::address(&self.program_id),
+                                false,
+                            ),
+                            AccountMeta::new_readonly(
+                                Pubkey::find_program_address(&[], &self.program_id).0,
+                                false,
+                            ),
+                            AccountMeta::new_readonly(system_program::ID, false),
+                            AccountMeta::new_readonly(self.program_id, false),
+                            AccountMeta::new_readonly(rent::ID, false),
+                        ];
+                        #[cfg(feature = "anchor-debug")]
+                        eprintln!(
+                            "anchor-debug: prepending accounts for constructor call: {:?}",
+                            accs
+                        );
+                        accs
+                    }
                 };
                 accounts.extend_from_slice(&self.accounts);
                 accounts
